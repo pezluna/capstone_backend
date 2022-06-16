@@ -5,6 +5,7 @@
 #include <WinSock2.h>
 #include <string>
 #include <sstream>
+#include <vector>
 
 #include <stdio.h>
 #include <iostream>
@@ -79,7 +80,10 @@ vector<string> get_event(char* buffer)
     string tmp_data(buffer);
     
     tmp_data = tmp_data.substr(1);
-    vector<string> event_data = split(tmp_data, ',');
+
+    for (string data : split(tmp_data, ',')) {
+        event_data.push_back(data);
+    }
 
     return event_data;
 }
@@ -123,7 +127,7 @@ double mag_pos(double x[]) {
 }
 
 int shoot_handler(SOCK_INFO* client, double phi, double theta) {
-    int d = 1e9;
+    int d = (int)1e9;
     int victim = -1;
     double dphi = phi * 180 / M_PI;
     double dtheta = theta * 180 / M_PI;
@@ -152,15 +156,6 @@ int shoot_handler(SOCK_INFO* client, double phi, double theta) {
 
         if (d > mag_pos(proj)) {
             victim = i;
-
-            cout << "shoot by " << client->u->username << " to " << room_list[roomname].users[victim]->username << endl;
-
-            for (int j = i + 1; j < room_list[roomname].user_count; j++)
-            {
-                room_list[roomname].users[j - 1] = room_list[roomname].users[j];
-            }
-            room_list[roomname].user_count -= 1;
-            break;
         }
     }
 
@@ -171,18 +166,16 @@ void erase_room(string room_name) {
     room_list.erase(room_name);
 }
 
-int event_handler(Json::Value data, SOCK_INFO* client) {
-    string event_name;
-    Json::Value event_value;
+int event_handler(vector<string> data, SOCK_INFO* client) {
+    string event_name = data[0];
 
-    event_name = data["event"].asString();
-    event_value = data["value"];
-
-    cout << "Event (" << event_name << ") is happened!" << endl;
-
-    if (event_name == "enter") {
-        client->u->username = event_value["username"].asString();
-        string tmp_roomname = event_value["roomname"].asString();
+    if (event_name == "E") {
+        /*
+        * 유저가 룸에 접속할 때 발생하는 이벤트(Enter)
+        * data : {"E", "<username>", "<roomname>"}
+        */
+        client->u->username = data[1];
+        string tmp_roomname = data[2];
 
         if (room_list[tmp_roomname].user_count >= MAX_ROOM_MEMBER) {
             cout << "Room " << tmp_roomname << "is already fulled!" << endl;
@@ -193,74 +186,44 @@ int event_handler(Json::Value data, SOCK_INFO* client) {
             room_list[tmp_roomname].user_count += 1;
         }
     }
-    else if (event_name == "position") {
-        client->u->x = event_value["x"].asDouble();
-        client->u->y = event_value["y"].asDouble();
-        client->u->z = event_value["z"].asDouble();
+    else if (event_name == "P") {
+        /*
+        * 유저의 위치 정보를 받는 이벤트(Position)
+        * data : {"P", "<x>", "<y>", "<z>"}
+        */
+        client->u->x = stod(data[1]);
+        client->u->y = stod(data[2]);
+        client->u->z = stod(data[3]);
     }
     else if (event_name == "shoot") {
-        double phi = event_value["phi"].asDouble();
-        double theta = event_value["theta"].asDouble();
+        double phi = stod(data[1]);
+        double theta = stod(data[2]);
 
         int victim = shoot_handler(client, phi, theta);
 
         if (victim != -1) {
-            Json::Value response;
-            Json::Value value;
+            cout << "[Kill] " << client->u->username << " kills " << room_list[client->u->roomname].users[victim]->username << endl;
 
-            response["event"] = "result";
-            value["username"] = client->u->username;
-            value["victim"] = room_list[client->u->roomname].users[victim]->username;
-            response["value"] = value;
+            string v_name = room_list[client->u->roomname].users[victim]->username;
+            string k_name = client->u->username;
 
-            string response_string = response.toStyledString();
+            send(client->socket, ("W" + v_name).c_str(), v_name.length() + 1, 0);
+            send(room_list[client->u->roomname].users[victim]->s->socket, ("L" + k_name).c_str(), k_name.length() + 1, 0);
 
-            for (int i = 0; i < room_list[client->u->roomname].user_count; i++) {
-                send(room_list[client->u->roomname].users[i]->s->socket, response_string.c_str(), response_string.size(), 0);
-            }
-        }
-
-    }
-    else if (event_name == "disconnect") {
-        bool flag = false;
-        for (int i = 0; i < room_list[client->u->roomname].user_count; i++) {
-            if (client == room_list[client->u->roomname].users[i]->s) {
-                room_list[client->u->roomname].users[i]->x = 0;
-                room_list[client->u->roomname].users[i]->y = 0;
-                room_list[client->u->roomname].users[i]->z = 0;
-                room_list[client->u->roomname].users[i]->roomname = "";
-                room_list[client->u->roomname].users[i]->username = "";
-
-                flag = true;
-            }
-
-            if (flag) {
-                if (i == room_list[client->u->roomname].user_count - 1) break;
-
+            for (int i = victim; i < room_list[client->u->roomname].user_count - 1; i++) {
                 room_list[client->u->roomname].users[i] = room_list[client->u->roomname].users[i + 1];
             }
-        }
 
-        room_list[client->u->roomname].user_count -= 1;
+            room_list[client->u->roomname].user_count -= 1;
 
-        if (room_list[client->u->roomname].user_count == 0) {
-            erase_room(client->u->roomname);
-        }
-        else {
-            room_list[client->u->roomname].users[room_list[client->u->roomname].user_count] = NULL;
-        }
-
-        Json::Value response;
-        Json::Value value;
-
-        response["event"] = "disconnect";
-        value["username"] = client->u->username;
-        response["value"] = value;
-
-        string response_string = response.toStyledString();
-
-        for (int i = 0; i < room_list[client->u->roomname].user_count; i++) {
-            send(room_list[client->u->roomname].users[i]->s->socket, response_string.c_str(), response_string.size(), 0);
+            if (room_list[client->u->roomname].user_count <= 1) {
+                send(client->socket, "D", 1, 0);
+            }
+            else {
+                for (int i = 0; i < room_list[client->u->roomname].user_count; i++) {
+                    send(client->socket, ("I" + v_name).c_str(), v_name.length() + 1, 0);
+                }
+            }
         }
     }
 

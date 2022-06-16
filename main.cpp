@@ -69,8 +69,6 @@ void add_client(int idx) {
 
     WSAEventSelect(client_socket, ev, FD_READ | FD_CLOSE);
 
-
-
     socket_count += 1;
 
     cout << "Client Connected : " << clients[socket_count - 1].ip << endl;
@@ -82,7 +80,7 @@ unsigned int WINAPI recv_data(void* params) {
     SOCKADDR_IN client_addr;
     int recv_len;
     int addr_len;
-    Json::Value data;
+    vector<string> data;
 
     memset(&client_addr, 0, sizeof(client_addr));
 
@@ -90,9 +88,15 @@ unsigned int WINAPI recv_data(void* params) {
         addr_len = sizeof(client_addr);
         getpeername(clients[idx].socket, (SOCKADDR*)&client_addr, &addr_len);
 
-        data = json_from_buffer(buf);
+        data = get_event(buf);
 
-        if(data) cout << data << endl;
+        cout << data[0] << " is happened!" << endl;
+        cout << "Full Information" << endl;
+
+        for (unsigned int i = 1; i < data.size(); i++) {
+            cout << data[i] << " ";
+        }
+        cout << endl << endl;
 
         int ret = event_handler(data, &clients[idx]);
     }
@@ -175,12 +179,12 @@ unsigned int WINAPI core_thread(void* params) {
             add_client(idx);
         }
         else if (ev.lNetworkEvents == FD_READ) {
-            read_client(idx);
             // 클라이언트로부터 데이터 수신
+            read_client(idx);
         }
         else if (ev.lNetworkEvents == FD_CLOSE) {
-            rm_client(idx);
             // 클라이언트 접속 종료
+            rm_client(idx);
         }
     }
 
