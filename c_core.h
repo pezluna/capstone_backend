@@ -194,6 +194,8 @@ int event_handler(vector<string> data, SOCK_INFO* client) {
         client->u->x = stod(data[1]);
         client->u->y = stod(data[2]);
         client->u->z = stod(data[3]);
+
+        send(client->socket, "C", 1, 0);
     }
     else if (event_name == "shoot") {
         double phi = stod(data[1]);
